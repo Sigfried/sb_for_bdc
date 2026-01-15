@@ -10,3 +10,5 @@ export EDITOR=vi
 export GIT_EDITOR=vi
 
 set -o vi 
+
+alias gs="git status"
