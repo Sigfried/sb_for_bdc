@@ -1,0 +1,12 @@
+#! /usr/bin/bash
+
+export REPO_DIR="/sbgenomics/workspace/sb_for_bdc"
+cd $REPO_DIR
+
+git config user.email "sigfried@sigfried.org"  # that's my github email; to contact me about this: sigfried@jhu.edu
+git config user.name "Sigfried Gold"
+
+export EDITOR=vi
+export GIT_EDITOR=vi
+
+set -o vi 
