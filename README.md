@@ -7,6 +7,7 @@ Currently just for harmonized variable summary analysis
 `source /sbgenomics/workspace/sb_for_bdc/setup`
 
 This will set
+
 	- my (Sigfried Gold) git user.email and user.name
 	- EDITOR=vi
 	- vi mode for shell
