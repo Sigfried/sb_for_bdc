@@ -1,0 +1,99 @@
+LABEL INCONSISTENCY REPORT
+===========================
+
+Comparing labels between:
+  - harmonized_vars.tsv (has var_name + var_label)
+  - "Harmonized Variables for LinkML CDE Schema - harmonized variables.tsv" (has label + DbXrefs/CURIEs)
+
+SUMMARY
+-------
+File 1 (harmonized_vars.tsv): 151 labels
+File 2 (curie file): 109 labels
+Exact matches: 89
+Only in File 1: 62
+Only in File 2: 20
+
+
+LIKELY MATCHES - labels that probably refer to the same thing but differ in wording/case
+----------------------------------------------------------------------------------------
+harmonized_vars.tsv                        curie file
+-----------------------------------------  -----------------------------------------
+AHI Apnea-Hypopnea Index                   Apnea-Hypopnea Index
+ALT SGPT                                   ALT
+Alcohol                                    Alcohol Consumption
+Bilirubin total                            Bilirubin Total
+Cigarette smoking                          Cigarette smoking status
+Fasting blood glucose                      Blood glucose
+Fruits                                     Fruit consumption
+Vegetables                                 Vegetable consumption
+basophils count                            Basophils Count
+c-reactive protein CRP                     CRP c-reactive protein
+interleukin 6 in blood                     Interleukin 6 in blood
+mean corpuscular hemoglobin                Mean corpuscular hemoglobin
+mean corpuscular hemoglobin concentration  Mean corpuscular hemoglobin concentration
+mean corpuscular volume                    Mean corpuscular volume
+mean platelet volume                       Mean platelet volume
+monocytes count                            Monocytes count
+von Willebrand factor                      Von Willebrand factor
+
+
+LABELS ONLY IN FILE 1 (harmonized_vars.tsv) - missing from curie file
+----------------------------------------------------------------------
+These have var_names but no CURIE mapping available:
+
+  Angina (var_name: angina)
+  Aspirin (var_name: aspirin)
+  Asthma (var_name: asthma)
+  Atrial fibrillation (var_name: afib)
+  COPD (var_name: copd)
+  Cardiovascular disease (var_name: cvd)
+  Carotid plaque (var_name: carotid_plaque)
+  Death (var_name: death_stat)
+  Diabetes (var_name: diabetes)
+  Family history of stroke (var_name: fam_stroke)
+  Fasting lipids (var_name: fast_lipids)
+  Glucose in blood (var_name: glucose_bld)
+  History of cardiovascular disease (var_name: hist_cvd)
+  History of coronary angioplasty (var_name: hist_cor_angio)
+  History of coronary artery bypass graft (var_name: hist_cor_bypg)
+  History of heart disease (var_name: hist_hrtdis)
+  History of heart failure (var_name: hist_hrtfail)
+  History of myocardial infarction (var_name: hist_my_inf)
+  Hypertension (var_name: hyperten)
+  Hypertension treatment (var_name: hypert_trt)
+  Interleukin 18 in blood (var_name: il18)
+  LVH from EKG (var_name: lvh_ekg)
+  Medication adherence (var_name: med_adher)
+  Obesity (var_name: obesity)
+  Pacemaker implant status (var_name: pacem_stat)
+  Sleep apnea (var_name: slp_ap)
+  Stroke (var_name: stroke)
+  Taking ACE inhibitors (var_name: tak_aceinhib)
+  Taking aldosterone receptor blockers (var_name: tak_aldorecepblk)
+  Taking alpha blockers (var_name: tak_alphablk)
+  Taking angiotensin receptor blockers (var_name: tak_angiorecepblk)
+  Taking beta blockers (var_name: tak_betablk)
+  Taking calcium channel blockers (var_name: tak_calchanblk)
+  Taking centrally acting agents (var_name: tak_cenactag)
+  Taking diuretics (var_name: tak_diuret)
+  Taking insulin (var_name: tak_insulin)
+  Taking medication for diabetes (var_name: tak_med_diab)
+  Taking non statin medication (var_name: tak_nstat_med)
+  Taking oral hypoglycemic agents (var_name: tak_orlhypoag)
+  Taking statin medication (var_name: tak_statin)
+  Taking systemic steroids (var_name: tak_steroid)
+  Taking vasodilators (var_name: tak_vasodil)
+  Valvular heart disease (var_name: valv_hrtdis)
+  Venous thromboembolism (var_name: ven_thromb)
+  peripheral arterial disease (var_name: pad)
+
+
+LABELS ONLY IN FILE 2 (curie file) - missing from harmonized_vars.tsv
+----------------------------------------------------------------------
+These have CURIEs but no var_name mapping available:
+
+  Condition status
+  Drug Status
+  Procedure status
+
+(The others in this category are likely matches listed above)

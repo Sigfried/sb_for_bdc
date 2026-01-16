@@ -17,7 +17,8 @@ Usage:
     # In Jupyter notebook (no debugger on DataStudio, but can run cells):
     from generate_qaqc_data import *
     var_labels = get_var_label_lookup()
-    result = load_measurement_observations(BASE_DIR, set(var_labels.keys()))
+    priority_vars = set(var_labels.keys())
+    result = load_measurement_observations(BASE_DIR, priority_vars)
     summary = summarize_observations(result.df, var_labels)
 
 Input files:
@@ -72,17 +73,17 @@ def get_var_label_lookup(file_path: str = None) -> dict:
     return {r['var_name']: r['var_label'] for r in rows}
 
 
-def load_measurement_observations(base_dir: str = None, valid_codes: set = None) -> LoadResult:
+def load_measurement_observations(base_dir: str = None, priority_vars: set = None) -> LoadResult:
     """
     Load all MeasurementObservation files from *-remapped directories.
 
     Scans base_dir for directories matching *-remapped, then loads all TSV files
-    matching *MeasurementObservation*.tsv. Optionally filters to known observation
-    types and tracks diagnostics about unexpected codes.
+    matching *MeasurementObservation*.tsv. Optionally filters to priority variables
+    and tracks diagnostics about excluded observation types.
 
     Args:
         base_dir: Directory containing *-remapped subdirectories. Defaults to BASE_DIR.
-        valid_codes: Set of valid observation_type values to keep. If provided,
+        priority_vars: Set of observation_type values (var_names) to keep. If provided,
             rows with other observation types are excluded and tracked in diagnostics.
 
     Returns:
@@ -95,7 +96,7 @@ def load_measurement_observations(base_dir: str = None, valid_codes: set = None)
     base_path = Path(base_dir)
     dfs = []
     diag_rows = []
-    
+
     for remapped_dir in sorted(base_path.glob("*-remapped")):
         for tsv_file in remapped_dir.glob("*MeasurementObservation*.tsv"):
             print(f"Loading {tsv_file.name}...", flush=True)
@@ -108,40 +109,40 @@ def load_measurement_observations(base_dir: str = None, valid_codes: set = None)
             )
             file_df['source_file'] = tsv_file.name
             file_df['source_dir'] = remapped_dir.name
-            
+
             # Diagnostics for this file
             total_rows = len(file_df)
             total_participants = file_df['associated_participant'].nunique()
-            
-            if valid_codes:
-                expected_mask = file_df['observation_type'].isin(valid_codes)
-                expected_rows = int(expected_mask.sum())
-                unexpected_rows = total_rows - expected_rows
-                
-                # Top unexpected codes
-                unexpected_df = file_df[~expected_mask]
-                top_unexpected = (
-                    unexpected_df['observation_type']
+
+            if priority_vars:
+                priority_mask = file_df['observation_type'].isin(priority_vars)
+                priority_rows = int(priority_mask.sum())
+                excluded_rows = total_rows - priority_rows
+
+                # Top excluded observation types
+                excluded_df = file_df[~priority_mask]
+                top_excluded = (
+                    excluded_df['observation_type']
                     .value_counts()
                     .head(5)
                     .to_dict()
                 )
-                
-                # Keep only expected
-                file_df = file_df[expected_mask]
+
+                # Keep only priority vars
+                file_df = file_df[priority_mask]
             else:
-                expected_rows = total_rows
-                unexpected_rows = 0
-                top_unexpected = {}
+                priority_rows = total_rows
+                excluded_rows = 0
+                top_excluded = {}
             
             diag_rows.append({
                 'source_dir': remapped_dir.name,
                 'source_file': tsv_file.name,
                 'total_rows': total_rows,
-                'expected_rows': expected_rows,
-                'unexpected_rows': unexpected_rows,
+                'priority_rows': priority_rows,
+                'excluded_rows': excluded_rows,
                 'participants': total_participants,
-                'top_unexpected': top_unexpected if top_unexpected else None,
+                'top_excluded': top_excluded if top_excluded else None,
             })
             
             dfs.append(file_df)
@@ -243,12 +244,12 @@ def main():
     # Load mappings
     print("Loading variable mappings...", flush=True)
     var_labels = get_var_label_lookup()
-    valid_codes = set(var_labels.keys())
-    print(f"Found {len(valid_codes)} valid observation codes\n", flush=True)
+    priority_vars = set(var_labels.keys())
+    print(f"Found {len(priority_vars)} priority variables\n", flush=True)
 
     # Load data
     print("Loading MeasurementObservation files...", flush=True)
-    result = load_measurement_observations(BASE_DIR, valid_codes)
+    result = load_measurement_observations(BASE_DIR, priority_vars)
     
     # Print diagnostics
     print("\n" + "="*80)
@@ -283,9 +284,9 @@ def main():
     print(f"Unique observation types: {result.df['observation_type'].nunique()}")
     print(f"Unique participants: {result.df['associated_participant'].nunique():,}")
     
-    total_unexpected = result.diagnostics['unexpected_rows'].sum()
-    if total_unexpected > 0:
-        print(f"\nWARNING: {total_unexpected:,} rows with unexpected observation types were excluded")
+    total_excluded = result.diagnostics['excluded_rows'].sum()
+    if total_excluded > 0:
+        print(f"\nNOTE: {total_excluded:,} rows with non-priority observation types were excluded")
 
 
 if __name__ == '__main__':
