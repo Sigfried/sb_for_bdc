@@ -1,6 +1,34 @@
 #!/usr/bin/env python3
 """
-Load and summarize MeasurementObservation data from harmonized cohort files.
+Generate QAQC summary statistics for harmonized MeasurementObservation data.
+
+This script loads MeasurementObservation TSV files from the BioData Catalyst
+harmonized cohort data, filters to known observation types, and generates
+summary statistics (counts, means, medians, etc.) for each variable.
+
+Directory structure on Seven Bridges DataStudio:
+    /sbgenomics/project-files/     - Read-only project files (input data)
+    /sbgenomics/workspace/         - Read-write workspace (code and output)
+
+Usage:
+    # As a script:
+    python generate_qaqc_data.py
+
+    # In Jupyter notebook (no debugger on DataStudio, but can run cells):
+    from generate_qaqc_data import *
+    var_labels = get_var_label_lookup()
+    result = load_measurement_observations(BASE_DIR, set(var_labels.keys()))
+    summary = summarize_observations(result.df, var_labels)
+
+Input files:
+    - harmonized_vars.tsv: Mapping of observation_type codes to human-readable labels
+      Located in /sbgenomics/project-files/QAQC_support_files/
+    - *MeasurementObservation*.tsv: Harmonized data files in *-remapped directories
+      Located in /sbgenomics/project-files/TSV_output/
+
+Output files (written to OUTPUT_DIR):
+    - diagnostics_<timestamp>.tsv: Per-file row counts and unexpected code info
+    - measurement_summary_<timestamp>.tsv: Summary statistics by observation type
 """
 
 import csv
@@ -9,18 +37,34 @@ from pathlib import Path
 from dataclasses import dataclass
 from datetime import datetime
 
+# =============================================================================
+# Configuration - adjust these paths as needed for your environment
+# =============================================================================
+BASE_DIR = '/sbgenomics/project-files/TSV_output'
+HARMONIZED_VARS_PATH = '/sbgenomics/project-files/QAQC_support_files/harmonized_vars.tsv'
+OUTPUT_DIR = Path('/sbgenomics/workspace/sb_for_bdc/harmonized_qaqc/output')
+
 
 @dataclass
 class LoadResult:
-    df: pd.DataFrame
-    diagnostics: pd.DataFrame
+    """Container for loaded data and diagnostics from load_measurement_observations()."""
+    df: pd.DataFrame          # Combined MeasurementObservation data
+    diagnostics: pd.DataFrame  # Per-file statistics and unexpected code info
 
 
 def get_var_label_lookup(file_path: str = None) -> dict:
-    """Load the variable name to label mapping."""
+    """
+    Load the variable name to label mapping from harmonized_vars.tsv.
+
+    Args:
+        file_path: Path to harmonized_vars.tsv. Defaults to HARMONIZED_VARS_PATH.
+
+    Returns:
+        Dict mapping observation_type codes (e.g., 'bmi_1') to labels (e.g., 'body mass index').
+    """
     if file_path is None:
-        file_path = '/sbgenomics/workspace/NHLBI-BDC-DMC-HV/transform_assessment/harmonized_qaqc/harmonized_vars.tsv'
-    
+        file_path = HARMONIZED_VARS_PATH
+
     with open(file_path, mode='r', encoding='utf-8') as f:
         reader = csv.DictReader(f, delimiter='\t')
         rows = list(reader)
@@ -28,11 +72,26 @@ def get_var_label_lookup(file_path: str = None) -> dict:
     return {r['var_name']: r['var_label'] for r in rows}
 
 
-def load_measurement_observations(base_dir: str, valid_codes: set = None) -> LoadResult:
+def load_measurement_observations(base_dir: str = None, valid_codes: set = None) -> LoadResult:
     """
-    Load all MeasurementObservation files from *-remapped directories
-    into a single DataFrame. Returns filtered data and diagnostics.
+    Load all MeasurementObservation files from *-remapped directories.
+
+    Scans base_dir for directories matching *-remapped, then loads all TSV files
+    matching *MeasurementObservation*.tsv. Optionally filters to known observation
+    types and tracks diagnostics about unexpected codes.
+
+    Args:
+        base_dir: Directory containing *-remapped subdirectories. Defaults to BASE_DIR.
+        valid_codes: Set of valid observation_type values to keep. If provided,
+            rows with other observation types are excluded and tracked in diagnostics.
+
+    Returns:
+        LoadResult with:
+            - df: Combined DataFrame with columns from source files plus source_file, source_dir
+            - diagnostics: DataFrame with per-file statistics
     """
+    if base_dir is None:
+        base_dir = BASE_DIR
     base_path = Path(base_dir)
     dfs = []
     diag_rows = []
@@ -96,6 +155,19 @@ def load_measurement_observations(base_dir: str, valid_codes: set = None) -> Loa
 def summarize_observations(df: pd.DataFrame, var_labels: dict = None) -> pd.DataFrame:
     """
     Generate summary statistics for each observation_type.
+
+    For each unique observation_type, computes:
+        - n: Total row count
+        - nulls_missing: Count of null/None values
+        - participants: Unique participant count
+        - mean, median, min, max, sd: Numeric statistics (if values are numeric)
+
+    Args:
+        df: DataFrame with observation_type, value columns, and associated_participant.
+        var_labels: Optional dict mapping observation_type to human-readable labels.
+
+    Returns:
+        DataFrame with one row per observation_type and summary columns.
     """
     df = df.copy()
     df['value'] = df.get('value_quantity__value_decimal')
@@ -159,22 +231,24 @@ def format_summary_for_print(summary: pd.DataFrame) -> str:
 
 
 def main():
-    # Configuration
-    base_dir = '/sbgenomics/project-files/TSV_output'
-    output_dir = Path('/sbgenomics/workspace/NHLBI-BDC-DMC-HV/transform_assessment/harmonized_qaqc/output')
-    output_dir.mkdir(parents=True, exist_ok=True)
-    
+    """
+    Main entry point: load data, generate summaries, and save outputs.
+
+    Uses module-level constants BASE_DIR, HARMONIZED_VARS_PATH, and OUTPUT_DIR.
+    Can also be run step-by-step in a Jupyter notebook - see module docstring.
+    """
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-    
+
     # Load mappings
     print("Loading variable mappings...", flush=True)
     var_labels = get_var_label_lookup()
     valid_codes = set(var_labels.keys())
     print(f"Found {len(valid_codes)} valid observation codes\n", flush=True)
-    
+
     # Load data
     print("Loading MeasurementObservation files...", flush=True)
-    result = load_measurement_observations(base_dir, valid_codes)
+    result = load_measurement_observations(BASE_DIR, valid_codes)
     
     # Print diagnostics
     print("\n" + "="*80)
@@ -183,7 +257,7 @@ def main():
     print(result.diagnostics.to_string())
     
     # Save diagnostics
-    diag_file = output_dir / f'diagnostics_{timestamp}.tsv'
+    diag_file = OUTPUT_DIR / f'diagnostics_{timestamp}.tsv'
     result.diagnostics.to_csv(diag_file, sep='\t', index=False)
     print(f"\nDiagnostics saved to: {diag_file}")
     
@@ -197,7 +271,7 @@ def main():
     print("\n" + format_summary_for_print(summary))
     
     # Save summary
-    summary_file = output_dir / f'measurement_summary_{timestamp}.tsv'
+    summary_file = OUTPUT_DIR / f'measurement_summary_{timestamp}.tsv'
     summary.to_csv(summary_file, sep='\t', index=False)
     print(f"\nSummary saved to: {summary_file}")
     
