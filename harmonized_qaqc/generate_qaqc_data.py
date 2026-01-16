@@ -21,6 +21,14 @@ Usage:
     result = load_measurement_observations(BASE_DIR, priority_vars)
     summary = summarize_observations(result.df, var_labels)
 
+    # View as markdown with commafied numbers:
+    print(format_diagnostics_markdown(result.diagnostics))
+    print(format_summary_markdown(summary))
+
+    # Generate paste-ready TSV for Google Sheets Table S5:
+    sheets_tsv = format_for_sheets(summary, var_labels)
+    print(sheets_tsv)  # Copy this output and paste into cell B3
+
 Input files:
     - harmonized_vars.tsv: Mapping of observation_type codes to human-readable labels
       Located in /sbgenomics/project-files/QAQC_support_files/
@@ -229,6 +237,217 @@ def format_summary_for_print(summary: pd.DataFrame) -> str:
         if col in df.columns:
             df[col] = df[col].apply(lambda x: f'{x:,}' if pd.notna(x) else '')
     return df.to_string()
+
+
+# =============================================================================
+# Google Sheets target format (Table S5)
+# =============================================================================
+# Ordered list of priority variable labels for Table S5
+# This defines the exact row order for the paste-ready output
+TABLE_S5_LABELS = [
+    "8-epi-PGF2a in urine",
+    "Activity LP-PLA2 in blood",
+    "AHI Apnea-Hypopnea Index",
+    "Albumin creatinine ratio in urine",
+    "Albumin in blood",
+    "Albumin in urine",
+    "Alcohol Consumption",
+    "ALT SGPT",
+    "AST SGOT",
+    "Basophils Count",
+    "Bilirubin Conjugated Direct",
+    "Bilirubin total",
+    "BMI",
+    "BNP",
+    "Body weight",
+    "BUN",
+    "BUN Creatinine ratio",
+    "CRP c-reactive protein",
+    "CAC Score",
+    "CAC volume",
+    "Carotid IMT",
+    "Carotid stenosis left",
+    "Carotid stenosis right",
+    "CD40 in blood",
+    "CESD score",
+    "Chloride in blood",
+    "Cigarette smoking",
+    "Creatinine in blood",
+    "Creatinine in urine",
+    "Cystatin C in blood",
+    "D-Dimer",
+    "Diastolic blood pressure",
+    "E-selectin in blood",
+    "EGFR",
+    "Eosinophils count",
+    "Factor VII",
+    "Factor VIII",
+    "Fasting blood glucose",
+    "Fasting lipids",
+    "Ferritin",
+    "FEV1 - Forced Expiratory Volume in 1 sec",
+    "FEV1 FVC",
+    "Fibrinogen",
+    "Fruit consumption",
+    "FVC - Forced Vital Capacity",
+    "GFR",
+    "Glucose in blood",
+    "HDL",
+    "Heart rate",
+    "Height",
+    "Hematocrit",
+    "Hemoglobin",
+    "Hemoglobin A1c",
+    "Hip circumference",
+    "ICAM1 in blood",
+    "Insulin in blood",
+    "Interleukin 1 beta in blood",
+    "Interleukin 10 in blood",
+    "interleukin 6 in blood",
+    "Lactate Dehydrogenase LDH",
+    "Lactate in blood",
+    "LDL",
+    "Lymphocytes count",
+    "Lymphocytes percent",
+    "Mass LP-PLA2 in blood",
+    "MCP1 in blood",
+    "Mean arterial pressure",
+    "Mean corpuscular hemoglobin",
+    "Mean corpuscular hemoglobin concentration",
+    "Mean corpuscular volume",
+    "Mean platelet volume",
+    "MMP9 in blood",
+    "Monocytes count",
+    "Myeloperoxidase in blood",
+    "Neutrophils count",
+    "Neutrophils percent",
+    "NT pro BNP",
+    "Osteoprotegerin in blood",
+    "P-selectin in blood",
+    "Platelet count",
+    "Potassium in blood",
+    "PR interval",
+    "QRS interval",
+    "QT interval",
+    "Red blood cell count",
+    "Red cell distribution width",
+    "Sleep hours",
+    "Sodium in blood",
+    "Sodium intake",
+    "SpO2",
+    "Systolic blood pressure",
+    "Temperature",
+    "TNFa in blood",
+    "TNFa-R1 in blood",
+    "Total cholesterol in blood",
+    "Triglycerides in blood",
+    "Troponin all types",
+    "Vegetable consumption",
+    "Von Willebrand factor",
+    "Waist circumference",
+    "Waist-hip ratio",
+    "White blood cell count",
+]
+
+
+def format_for_sheets(summary: pd.DataFrame, var_labels: dict) -> str:
+    """
+    Format summary for pasting into Google Sheets Table S5.
+
+    Creates a TSV with columns in the exact order expected by the sheet:
+    n, nulls/missing, mean, median, max, min, sd, enums, participants
+
+    Rows are ordered to match TABLE_S5_LABELS. Variables not in the summary
+    get blank rows. Raw numbers (no commas) for proper Sheets formatting.
+
+    Args:
+        summary: DataFrame from summarize_observations() with 'label' column.
+        var_labels: Dict mapping var_name to label (used to detect missing vars).
+
+    Returns:
+        TSV string ready to paste into cell B3 of Table S5.
+    """
+    # Build lookup from label to summary row
+    summary_by_label = {}
+    if 'label' in summary.columns:
+        for _, row in summary.iterrows():
+            if pd.notna(row.get('label')):
+                summary_by_label[row['label']] = row
+
+    # Sheet column order (excluding the Priority Variable column which is col A)
+    sheet_cols = ['n', 'nulls_missing', 'mean', 'median', 'max', 'min', 'sd', 'enums', 'participants']
+
+    lines = []
+    for label in TABLE_S5_LABELS:
+        if label in summary_by_label:
+            row = summary_by_label[label]
+            values = []
+            for col in sheet_cols:
+                if col == 'enums':
+                    values.append('')  # Empty for now (numeric data)
+                elif col == 'nulls_missing':
+                    val = row.get('nulls_missing', '')
+                    values.append('' if pd.isna(val) else str(int(val)))
+                elif col in ['n', 'participants']:
+                    val = row.get(col, '')
+                    values.append('' if pd.isna(val) else str(int(val)))
+                else:
+                    val = row.get(col, '')
+                    values.append('' if pd.isna(val) else str(val))
+            lines.append('\t'.join(values))
+        else:
+            # Blank row for missing variable
+            lines.append('\t'.join([''] * len(sheet_cols)))
+
+    return '\n'.join(lines)
+
+
+def format_markdown(df: pd.DataFrame, int_cols: list = None, float_cols: list = None) -> str:
+    """
+    Format a DataFrame as markdown with commafied numbers.
+
+    Args:
+        df: DataFrame to format.
+        int_cols: Columns to format as integers with commas.
+        float_cols: Columns to format as floats with commas (2 decimal places).
+
+    Returns:
+        Markdown table string.
+    """
+    fmt_df = df.copy()
+
+    if int_cols:
+        for col in int_cols:
+            if col in fmt_df.columns:
+                fmt_df[col] = fmt_df[col].apply(
+                    lambda x: f'{int(x):,}' if pd.notna(x) else ''
+                )
+
+    if float_cols:
+        for col in float_cols:
+            if col in fmt_df.columns:
+                fmt_df[col] = fmt_df[col].apply(
+                    lambda x: f'{x:,.2f}' if pd.notna(x) else ''
+                )
+
+    return fmt_df.to_markdown(index=False)
+
+
+def format_diagnostics_markdown(diagnostics: pd.DataFrame) -> str:
+    """Format diagnostics DataFrame as markdown with commafied numbers."""
+    return format_markdown(
+        diagnostics,
+        int_cols=['total_rows', 'priority_rows', 'excluded_rows', 'participants']
+    )
+
+
+def format_summary_markdown(summary: pd.DataFrame) -> str:
+    """Format summary DataFrame as markdown with commafied numbers."""
+    return format_markdown(
+        summary,
+        int_cols=['n', 'nulls_missing', 'participants'],
+        float_cols=['mean', 'median', 'min', 'max', 'sd']
+    )
 
 
 def main():
