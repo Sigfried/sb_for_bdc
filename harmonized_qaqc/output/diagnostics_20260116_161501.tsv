@@ -1,0 +1,10 @@
+source_dir	source_file	total_rows	priority_rows	excluded_rows	participants	top_excluded
+ARIC-v8-c1-remapped	ARIC-v8-c1-MeasurementObservation-HMB-IRB-data.tsv	143007	143007	0	14565	
+CARDIA-v3-c1-remapped	CARDIA-v3-c1-MeasurementObservation-HMB-IRB-data.tsv	555202	549315	5887	3111	{'OBA:VT0000188': 5887}
+CHS-v7-c1-remapped	CHS-v7-c1-MeasurementObservation-HMB-IRB-MDS-data.tsv	2240344	2209482	30862	5353	{'OBA:VT0000188': 21412, 'fasting_hdl_in_plasma': 3872, 'fasting_triglycerides_in_plasma': 3872}
+COPDGene-v6-c1-remapped	COPDGene-v6-c1-MeasurementObservation-HMB-data.tsv	100990	100990	0	10099	
+FHS-v31-c1-remapped	FHS-v31-c1-MeasurementObservation-HMB-IRB-MDS-data.tsv	2414416	1828121	586295	13071	{'OBA:VT0000188': 286109, 'fasting_hdl_in_plasma': 157440, 'OMOP:4273021': 71950, 'OMOP:37311566': 17734, 'OMOP:2212186': 14496}
+HCHS-SOL-v1-c1-remapped	HCHS-SOL-v1-c1-MeasurementObservation-HMB-NPU-data.tsv	152284	133594	18690	3461	{'OMOP:44777566': 3461, 'OMOP:37208634': 3461, 'fasting_hdl_in_serum': 2774, 'fasting_ldl_in_serum': 2774, 'fasting_total_cholesterol_in_serum': 2774}
+JHS-v7-c1-remapped	JHS-v7-c1-MeasurementObservation-HMB-IRB-NPU-data.tsv	877	877	0	877	
+MESA-v13-c1-remapped	MESA-v13-c1-MeasurementObservation-HMB-data.tsv	1370573	1133317	237256	7440	{'OMOP:607590': 35164, 'OMOP:4172830': 29552, 'OMOP:4111665': 29552, 'OMOP:3007081': 24884, 'OMOP:4099154': 13448}
+WHI-v12-c1-remapped	WHI-v12-c1-MeasurementObservation-HMB-IRB-data.tsv	13601999	13506304	95695	117675	{'fasting_hdl_in_plasma': 40872, 'OBA:VT0000188': 13831, 'fasting_ldl_in_plasma': 13624, 'fasting_total_cholesterol_in_serum': 13624, 'fasting_triglycerides_in_serum': 13624}
