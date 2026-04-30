@@ -242,6 +242,23 @@ def format_summary_for_print(summary: pd.DataFrame) -> str:
 # =============================================================================
 # Google Sheets target format (Table S5)
 # =============================================================================
+# S5 column-A labels that don't match harmonized_vars.tsv var_label exactly.
+# Maps S5 label -> tsv label so the canonical TSV (and the data labels derived
+# from it) can stay as-is while still finding the right row for the sheet.
+S5_LABEL_ALIASES = {
+    "Alcohol Consumption": "Alcohol",
+    "Basophils Count": "basophils count",
+    "CRP c-reactive protein": "c-reactive protein CRP",
+    "Fruit consumption": "Fruits",
+    "Mean corpuscular hemoglobin": "mean corpuscular hemoglobin",
+    "Mean corpuscular hemoglobin concentration": "mean corpuscular hemoglobin concentration",
+    "Mean corpuscular volume": "mean corpuscular volume",
+    "Mean platelet volume": "mean platelet volume",
+    "Monocytes count": "monocytes count",
+    "Vegetable consumption": "Vegetables",
+    "Von Willebrand factor": "von Willebrand factor",
+}
+
 # Ordered list of priority variable labels for Table S5
 # This defines the exact row order for the paste-ready output
 TABLE_S5_LABELS = [
@@ -350,7 +367,7 @@ TABLE_S5_LABELS = [
 ]
 
 
-def format_for_sheets(summary: pd.DataFrame, var_labels: dict) -> str:
+def format_for_sheets(summary: pd.DataFrame, var_labels: dict) -> tuple:
     """
     Format summary for pasting into Google Sheets Table S5.
 
@@ -360,46 +377,68 @@ def format_for_sheets(summary: pd.DataFrame, var_labels: dict) -> str:
     Rows are ordered to match TABLE_S5_LABELS. Variables not in the summary
     get blank rows. Raw numbers (no commas) for proper Sheets formatting.
 
+    S5 labels are looked up against summary labels via S5_LABEL_ALIASES first,
+    then by exact match.
+
     Args:
         summary: DataFrame from summarize_observations() with 'label' column.
         var_labels: Dict mapping var_name to label (used to detect missing vars).
 
     Returns:
-        TSV string ready to paste into cell B3 of Table S5.
+        (tsv_string, coverage_df) — TSV ready to paste into cell B3 of Table S5,
+        and a DataFrame with one row per S5 label showing match status.
     """
-    # Build lookup from label to summary row
     summary_by_label = {}
     if 'label' in summary.columns:
         for _, row in summary.iterrows():
             if pd.notna(row.get('label')):
                 summary_by_label[row['label']] = row
 
-    # Sheet column order (excluding the Priority Variable column which is col A)
     sheet_cols = ['n', 'nulls_missing', 'mean', 'median', 'max', 'min', 'sd', 'enums', 'participants']
 
     lines = []
+    coverage_rows = []
     for label in TABLE_S5_LABELS:
-        if label in summary_by_label:
-            row = summary_by_label[label]
+        lookup = S5_LABEL_ALIASES.get(label, label)
+        row = summary_by_label.get(lookup)
+        if row is not None:
+            status = 'aliased' if lookup != label else 'matched'
             values = []
             for col in sheet_cols:
                 if col == 'enums':
-                    values.append('')  # Empty for now (numeric data)
-                elif col == 'nulls_missing':
-                    val = row.get('nulls_missing', '')
-                    values.append('' if pd.isna(val) else str(int(val)))
-                elif col in ['n', 'participants']:
+                    values.append('')
+                elif col in ('nulls_missing', 'n', 'participants'):
                     val = row.get(col, '')
                     values.append('' if pd.isna(val) else str(int(val)))
                 else:
                     val = row.get(col, '')
                     values.append('' if pd.isna(val) else str(val))
             lines.append('\t'.join(values))
+            n_val = row.get('n')
         else:
-            # Blank row for missing variable
+            status = 'missing'
             lines.append('\t'.join([''] * len(sheet_cols)))
+            n_val = None
+        coverage_rows.append({
+            's5_label': label,
+            'lookup_label': lookup,
+            'status': status,
+            'n': int(n_val) if pd.notna(n_val) else None,
+        })
 
-    return '\n'.join(lines)
+    coverage = pd.DataFrame(coverage_rows)
+    return '\n'.join(lines), coverage
+
+
+def format_coverage_markdown(coverage: pd.DataFrame) -> str:
+    """Format S5 coverage report as markdown, grouped by status."""
+    counts = coverage['status'].value_counts().to_dict()
+    header = (
+        f"**S5 coverage:** {counts.get('matched', 0)} matched, "
+        f"{counts.get('aliased', 0)} matched via alias, "
+        f"{counts.get('missing', 0)} missing.\n"
+    )
+    return header + '\n' + format_markdown(coverage, int_cols=['n'])
 
 
 def format_markdown(df: pd.DataFrame, int_cols: list = None, float_cols: list = None) -> str:
@@ -494,7 +533,30 @@ def main():
     summary_file = OUTPUT_DIR / f'measurement_summary_{timestamp}.tsv'
     summary.to_csv(summary_file, sep='\t', index=False)
     print(f"\nSummary saved to: {summary_file}")
-    
+
+    # Sheets-pasteable TSV + coverage report
+    sheets_tsv, coverage = format_for_sheets(summary, var_labels)
+    sheets_file = OUTPUT_DIR / f'table_s5_paste_{timestamp}.tsv'
+    sheets_file.write_text(sheets_tsv)
+    print(f"Sheets paste-ready TSV saved to: {sheets_file}")
+
+    coverage_file = OUTPUT_DIR / f's5_coverage_{timestamp}.tsv'
+    coverage.to_csv(coverage_file, sep='\t', index=False)
+    print(f"S5 coverage report saved to: {coverage_file}")
+
+    print("\n" + "="*80)
+    print("S5 COVERAGE")
+    print("="*80)
+    counts = coverage['status'].value_counts().to_dict()
+    print(f"matched: {counts.get('matched', 0)}, "
+          f"aliased: {counts.get('aliased', 0)}, "
+          f"missing: {counts.get('missing', 0)}")
+    missing = coverage[coverage['status'] == 'missing']['s5_label'].tolist()
+    if missing:
+        print(f"\nMissing from data ({len(missing)}):")
+        for m in missing:
+            print(f"  - {m}")
+
     # Quick stats
     print("\n" + "="*80)
     print("QUICK STATS")
