@@ -209,55 +209,27 @@ def summarize_observations(df: pd.DataFrame, var_labels: dict = None) -> pd.Data
     df['value'] = df.get('value_quantity__value_decimal')
     if 'value_quantity__value_concept' in df.columns:
         df['value'] = df['value'].fillna(df['value_quantity__value_concept'])
-    
-    # Convert to numeric where possible
+
     df['value_numeric'] = pd.to_numeric(df['value'], errors='coerce')
-    
-    def summarize_group(g):
-        numeric_vals = g['value_numeric'].dropna()
-        
-        n = len(g)
-        nulls = g['value'].isna().sum() + (g['value'] == 'None').sum()
-        participants = g['associated_participant'].nunique()
-        
-        result = {
-            'n': int(n),
-            'nulls_missing': int(nulls),
-            'participants': int(participants),
-        }
-        
-        if len(numeric_vals) > 0:
-            result.update({
-                'mean': round(numeric_vals.mean(), 3),
-                'median': round(numeric_vals.median(), 3),
-                'min': numeric_vals.min(),
-                'max': round(numeric_vals.max(), 3),
-                'sd': round(numeric_vals.std(), 3),
-            })
-        else:
-            result.update({
-                'mean': None,
-                'median': None,
-                'min': None,
-                'max': None,
-                'sd': None,
-            })
-        
-        return pd.Series(result)
-    
-    try:
-        summary = df.groupby('observation_type').apply(summarize_group, include_groups=False)
-    except TypeError:
-        # pandas < 2.2 doesn't accept include_groups
-        summary = df.groupby('observation_type').apply(summarize_group)
-    summary = summary.reset_index()
-    
-    # Add labels if provided
+    df['_is_null'] = df['value'].isna() | (df['value'] == 'None')
+
+    grouped = df.groupby('observation_type', sort=True)
+    summary = pd.DataFrame({
+        'n': grouped.size(),
+        'nulls_missing': grouped['_is_null'].sum().astype(int),
+        'participants': grouped['associated_participant'].nunique(),
+        'mean': grouped['value_numeric'].mean().round(3),
+        'median': grouped['value_numeric'].median().round(3),
+        'min': grouped['value_numeric'].min(),
+        'max': grouped['value_numeric'].max().round(3),
+        'sd': grouped['value_numeric'].std().round(3),
+    }).reset_index()
+
     if var_labels:
         summary['label'] = summary['observation_type'].map(var_labels)
-        cols = ['observation_type', 'label'] + [c for c in summary.columns if c not in ['observation_type', 'label']]
+        cols = ['observation_type', 'label'] + [c for c in summary.columns if c not in ('observation_type', 'label')]
         summary = summary[cols]
-    
+
     return summary
 
 
