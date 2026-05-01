@@ -67,15 +67,34 @@ class LoadResult:
     df: pd.DataFrame
 
 
+# BDCHM ingest emits a small number of bare uppercase observation_type values
+# (e.g. CESD_SCORE) that don't match var_name.upper(). Map the exceptions here.
+BARE_NAME_ALIASES = {
+    'LYMPHOCYTES_COUNT': 'lympho_ct',
+    'NEUTROPHILS_COUNT': 'neutro_ct',
+}
+
+
 def get_var_label_lookup(file_path: str = None) -> dict:
     """
-    Load the variable name to label mapping from harmonized_vars.tsv.
+    Build a lookup from observation_type code (as emitted by BDCHM ingest) to
+    var_label.
+
+    BDCHM emits one of three forms in observation_type:
+      - "OMOP:<n>" — matches col 'OMOP Standard Concept ID' (bare numeric)
+      - "OBA:<id>" — matches col 'OBA CURIE' (already includes prefix)
+      - bare UPPERCASE name (e.g. CESD_SCORE) — matches var_name.upper(),
+        with BARE_NAME_ALIASES handling exceptions
+
+    Multiple OMOP/OBA codes may map to the same var_label (e.g. Albumin in
+    blood has both an OMOP and OBA mapping). All known codes for a var get
+    entries pointing at the same label.
 
     Args:
         file_path: Path to harmonized_vars.tsv. Defaults to HARMONIZED_VARS_PATH.
 
     Returns:
-        Dict mapping observation_type codes (e.g., 'bmi_1') to labels (e.g., 'body mass index').
+        Dict mapping observation_type code -> var_label.
     """
     if file_path is None:
         file_path = HARMONIZED_VARS_PATH
@@ -84,7 +103,26 @@ def get_var_label_lookup(file_path: str = None) -> dict:
         reader = csv.DictReader(f, delimiter='\t')
         rows = list(reader)
 
-    return {r['var_name']: r['var_label'] for r in rows}
+    lookup = {}
+    for r in rows:
+        label = r['var_label']
+        omop_id = r.get('OMOP Standard Concept ID', '').strip()
+        oba = r.get('OBA CURIE', '').strip()
+        var_name = r.get('var_name', '').strip()
+
+        if omop_id:
+            lookup[f'OMOP:{omop_id}'] = label
+        if oba.startswith('OBA:'):
+            lookup[oba] = label
+        if var_name:
+            lookup[var_name.upper()] = label
+
+    for bare, var_name in BARE_NAME_ALIASES.items():
+        match = next((r for r in rows if r.get('var_name', '').strip() == var_name), None)
+        if match:
+            lookup[bare] = match['var_label']
+
+    return lookup
 
 
 def load_measurement_observations(base_dir: str = None, priority_vars: set = None) -> LoadResult:
@@ -191,20 +229,29 @@ def load_with_excluded_summary(base_dir: str = None, priority_vars: set = None) 
 
 def summarize_observations(df: pd.DataFrame, var_labels: dict = None) -> pd.DataFrame:
     """
-    Generate summary statistics for each observation_type.
+    Generate summary statistics, grouped by var_label.
 
-    For each unique observation_type, computes:
+    The same conceptual variable (e.g. "Albumin in blood") may appear in the
+    data under multiple observation_type CURIEs (an OMOP code in some cohorts,
+    an OBA code in others, sometimes a bare uppercase name). var_labels maps
+    each CURIE to its var_label, and we group by the resolved label so each
+    variable gets one summary row.
+
+    For each unique var_label, computes:
         - n: Total row count
         - nulls_missing: Count of null/None values
         - participants: Unique participant count
         - mean, median, min, max, sd: Numeric statistics (if values are numeric)
+        - codes: Comma-separated list of observation_type CURIEs that mapped here
 
     Args:
         df: DataFrame with observation_type, value columns, and associated_participant.
-        var_labels: Optional dict mapping observation_type to human-readable labels.
+        var_labels: Dict mapping observation_type CURIE -> var_label. Required for
+            grouping (rows whose code isn't in the lookup are dropped — they shouldn't
+            be in df anyway because the loader filtered to priority codes).
 
     Returns:
-        DataFrame with one row per observation_type and summary columns.
+        DataFrame with one row per var_label and summary columns.
     """
     df = df.copy()
     df['value'] = df.get('value_quantity__value_decimal')
@@ -214,7 +261,13 @@ def summarize_observations(df: pd.DataFrame, var_labels: dict = None) -> pd.Data
     df['value_numeric'] = pd.to_numeric(df['value'], errors='coerce')
     df['_is_null'] = df['value'].isna() | (df['value'] == 'None')
 
-    grouped = df.groupby('observation_type', sort=True)
+    if not var_labels:
+        raise ValueError("summarize_observations requires var_labels to group by var_label")
+
+    df['label'] = df['observation_type'].map(var_labels)
+    df = df[df['label'].notna()]
+
+    grouped = df.groupby('label', sort=True)
     summary = pd.DataFrame({
         'n': grouped.size(),
         'nulls_missing': grouped['_is_null'].sum().astype(int),
@@ -224,12 +277,8 @@ def summarize_observations(df: pd.DataFrame, var_labels: dict = None) -> pd.Data
         'min': grouped['value_numeric'].min(),
         'max': grouped['value_numeric'].max().round(3),
         'sd': grouped['value_numeric'].std().round(3),
+        'codes': grouped['observation_type'].agg(lambda s: ', '.join(sorted(s.unique()))),
     }).reset_index()
-
-    if var_labels:
-        summary['label'] = summary['observation_type'].map(var_labels)
-        cols = ['observation_type', 'label'] + [c for c in summary.columns if c not in ('observation_type', 'label')]
-        summary = summary[cols]
 
     return summary
 
@@ -506,7 +555,8 @@ def main():
     print("Loading variable mappings...", flush=True)
     var_labels = get_var_label_lookup()
     priority_vars = set(var_labels.keys())
-    print(f"Found {len(priority_vars)} priority variables\n", flush=True)
+    n_distinct_labels = len(set(var_labels.values()))
+    print(f"Found {n_distinct_labels} priority variables ({len(priority_vars)} CURIE/name codes)\n", flush=True)
 
     print(f"Loading MeasurementObservation files from {BASE_DIR}...", flush=True)
     result, excluded = load_with_excluded_summary(BASE_DIR, priority_vars)
