@@ -43,6 +43,7 @@ Output files (written to OUTPUT_DIR):
 """
 
 import csv
+import tarfile
 import pandas as pd
 from pathlib import Path
 from dataclasses import dataclass
@@ -527,33 +528,57 @@ def main():
     coverage.to_csv(coverage_file, sep='\t', index=False)
     print(f"S5 coverage report saved to: {coverage_file}")
 
-    print("\n" + "="*80)
-    print("RUN SUMMARY")
-    print("="*80)
     cohort_dirs = sorted(result.df['source_dir'].unique()) if len(result.df) else []
-    print(f"Files loaded: {len(cohort_dirs)} cohort/consent dirs")
-    print(f"Total rows (priority-filtered): {len(result.df):,}")
-    if len(result.df):
-        print(f"Unique observation types: {result.df['observation_type'].nunique()}")
-        print(f"Unique participants: {result.df['associated_participant'].nunique():,}")
+    counts = coverage['status'].value_counts().to_dict()
+    missing = coverage[coverage['status'] == 'missing']['s5_label'].tolist()
 
+    run_summary_lines = [
+        f"Run timestamp: {timestamp}",
+        f"Source: {BASE_DIR}",
+        "",
+        "=" * 80,
+        "RUN SUMMARY",
+        "=" * 80,
+        f"Files loaded: {len(cohort_dirs)} cohort/consent dirs",
+        f"Total rows (priority-filtered): {len(result.df):,}",
+    ]
+    if len(result.df):
+        run_summary_lines += [
+            f"Unique observation types: {result.df['observation_type'].nunique()}",
+            f"Unique participants: {result.df['associated_participant'].nunique():,}",
+        ]
     if len(excluded):
         total_excluded = int(excluded['count'].sum())
-        print(f"\nExcluded {total_excluded:,} non-priority rows. Top 10 codes:")
-        print(excluded.head(10).to_string(index=False))
-
-    print("\n" + "="*80)
-    print("S5 COVERAGE")
-    print("="*80)
-    counts = coverage['status'].value_counts().to_dict()
-    print(f"matched: {counts.get('matched', 0)}, "
-          f"aliased: {counts.get('aliased', 0)}, "
-          f"missing: {counts.get('missing', 0)}")
-    missing = coverage[coverage['status'] == 'missing']['s5_label'].tolist()
+        run_summary_lines += [
+            "",
+            f"Excluded {total_excluded:,} non-priority rows. Top 10 codes:",
+            excluded.head(10).to_string(index=False),
+        ]
+    run_summary_lines += [
+        "",
+        "=" * 80,
+        "S5 COVERAGE",
+        "=" * 80,
+        f"matched: {counts.get('matched', 0)}, "
+        f"aliased: {counts.get('aliased', 0)}, "
+        f"missing: {counts.get('missing', 0)}",
+    ]
     if missing:
-        print(f"\nMissing from data ({len(missing)}):")
-        for m in missing:
-            print(f"  - {m}")
+        run_summary_lines += ["", f"Missing from data ({len(missing)}):"]
+        run_summary_lines += [f"  - {m}" for m in missing]
+
+    run_summary_text = "\n".join(run_summary_lines) + "\n"
+    print("\n" + run_summary_text)
+
+    run_summary_file = OUTPUT_DIR / f'run_summary_{timestamp}.txt'
+    run_summary_file.write_text(run_summary_text)
+
+    # Bundle the four output files + run summary into a tgz for easy download.
+    tgz_path = OUTPUT_DIR / f'qaqc_run_{timestamp}.tgz'
+    with tarfile.open(tgz_path, 'w:gz') as tar:
+        for f in (summary_file, sheets_file, coverage_file, run_summary_file):
+            tar.add(f, arcname=f.name)
+    print(f"\nBundle: {tgz_path}")
 
 
 if __name__ == '__main__':
