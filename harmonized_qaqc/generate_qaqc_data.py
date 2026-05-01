@@ -30,14 +30,16 @@ Usage:
     print(sheets_tsv)  # Copy this output and paste into cell B3
 
 Input files:
-    - harmonized_vars.tsv: Mapping of observation_type codes to human-readable labels
-      Located in /sbgenomics/project-files/QAQC_support_files/
-    - *MeasurementObservation*.tsv: Harmonized data files in *-remapped directories
-      Located in /sbgenomics/project-files/TSV_output/
+    - harmonized_vars.tsv: Mapping of var_name -> var_label. Lives in the repo
+      under harmonized_qaqc/QAQC_support_files_will_be_copied_into_project-files/
+      (read directly from the workspace clone — not copied into project-files).
+    - MeasurementObservation.tsv: One per cohort/consent group, under
+      /sbgenomics/project-files/DataRun_*/DMC_*_Processed_*/<study>_BDCHM/mapped-data/
 
 Output files (written to OUTPUT_DIR):
-    - diagnostics_<timestamp>.tsv: Per-file row counts and unexpected code info
     - measurement_summary_<timestamp>.tsv: Summary statistics by observation type
+    - table_s5_paste_<timestamp>.tsv: Paste-ready TSV for Google Sheets Table S5 (cell B3)
+    - s5_coverage_<timestamp>.tsv: Per-S5-label match status (matched/aliased/missing)
 """
 
 import csv
@@ -49,16 +51,19 @@ from datetime import datetime
 # =============================================================================
 # Configuration - adjust these paths as needed for your environment
 # =============================================================================
-BASE_DIR = '/sbgenomics/project-files/TSV_output'
-HARMONIZED_VARS_PATH = '/sbgenomics/project-files/QAQC_support_files/harmonized_vars.tsv'
+BASE_DIR = '/sbgenomics/project-files/DataRun_20260412_1830'
+HARMONIZED_VARS_PATH = str(
+    Path(__file__).parent
+    / 'QAQC_support_files_will_be_copied_into_project-files'
+    / 'harmonized_vars.tsv'
+)
 OUTPUT_DIR = Path('/sbgenomics/workspace/sb_for_bdc/harmonized_qaqc/output')
 
 
 @dataclass
 class LoadResult:
-    """Container for loaded data and diagnostics from load_measurement_observations()."""
-    df: pd.DataFrame          # Combined MeasurementObservation data
-    diagnostics: pd.DataFrame  # Per-file statistics and unexpected code info
+    """Container for loaded data from load_measurement_observations()."""
+    df: pd.DataFrame
 
 
 def get_var_label_lookup(file_path: str = None) -> dict:
@@ -83,82 +88,104 @@ def get_var_label_lookup(file_path: str = None) -> dict:
 
 def load_measurement_observations(base_dir: str = None, priority_vars: set = None) -> LoadResult:
     """
-    Load all MeasurementObservation files from *-remapped directories.
+    Load all MeasurementObservation.tsv files from a DataRun_* directory.
 
-    Scans base_dir for directories matching *-remapped, then loads all TSV files
-    matching *MeasurementObservation*.tsv. Optionally filters to priority variables
-    and tracks diagnostics about excluded observation types.
+    Layout (post-2026-04 BDCHM pipeline):
+        <base_dir>/DMC_<study>_<COHORT>_Processed_<ts>/<study>_BDCHM/mapped-data/MeasurementObservation.tsv
+
+    Each MeasurementObservation.tsv has the same flat name; cohort/consent is
+    encoded in the parent DMC_* directory.
 
     Args:
-        base_dir: Directory containing *-remapped subdirectories. Defaults to BASE_DIR.
-        priority_vars: Set of observation_type values (var_names) to keep. If provided,
-            rows with other observation types are excluded and tracked in diagnostics.
+        base_dir: DataRun_* directory. Defaults to BASE_DIR.
+        priority_vars: Set of observation_type values to keep. If given, non-priority
+            rows are dropped (tracked in the loader's stdout summary).
 
     Returns:
-        LoadResult with:
-            - df: Combined DataFrame with columns from source files plus source_file, source_dir
-            - diagnostics: DataFrame with per-file statistics
+        LoadResult with df containing all priority-filtered rows plus source_dir
+        (the DMC_* dir name, used as cohort/consent identifier).
     """
     if base_dir is None:
         base_dir = BASE_DIR
     base_path = Path(base_dir)
     dfs = []
-    diag_rows = []
 
-    for remapped_dir in sorted(base_path.glob("*-remapped")):
-        for tsv_file in remapped_dir.glob("*MeasurementObservation*.tsv"):
-            print(f"Loading {tsv_file.name}...", flush=True)
-            file_df = pd.read_csv(
-                tsv_file,
-                sep='\t',
-                dtype=str,
-                engine='python',
-                on_bad_lines=lambda bad_line: bad_line[:5]
-            )
-            file_df['source_file'] = tsv_file.name
-            file_df['source_dir'] = remapped_dir.name
+    tsv_files = sorted(base_path.glob("DMC_*/*/mapped-data/MeasurementObservation.tsv"))
+    print(f"Found {len(tsv_files)} MeasurementObservation.tsv files\n", flush=True)
 
-            # Diagnostics for this file
-            total_rows = len(file_df)
-            total_participants = file_df['associated_participant'].nunique()
+    for tsv_file in tsv_files:
+        # source_dir is the DMC_<...>_Processed_<ts> directory (cohort/consent ID)
+        source_dir = tsv_file.parents[2].name
+        print(f"Loading {source_dir}...", flush=True)
 
-            if priority_vars:
-                priority_mask = file_df['observation_type'].isin(priority_vars)
-                priority_rows = int(priority_mask.sum())
-                excluded_rows = total_rows - priority_rows
+        file_df = pd.read_csv(
+            tsv_file,
+            sep='\t',
+            dtype=str,
+            engine='python',
+            on_bad_lines=lambda bad_line: bad_line[:5]
+        )
+        file_df['source_dir'] = source_dir
 
-                # Top excluded observation types
-                excluded_df = file_df[~priority_mask]
-                top_excluded = (
-                    excluded_df['observation_type']
-                    .value_counts()
-                    .head(5)
-                    .to_dict()
-                )
+        if priority_vars:
+            file_df = file_df[file_df['observation_type'].isin(priority_vars)]
 
-                # Keep only priority vars
-                file_df = file_df[priority_mask]
-            else:
-                priority_rows = total_rows
-                excluded_rows = 0
-                top_excluded = {}
-            
-            diag_rows.append({
-                'source_dir': remapped_dir.name,
-                'source_file': tsv_file.name,
-                'total_rows': total_rows,
-                'priority_rows': priority_rows,
-                'excluded_rows': excluded_rows,
-                'participants': total_participants,
-                'top_excluded': top_excluded if top_excluded else None,
-            })
-            
-            dfs.append(file_df)
-    
+        dfs.append(file_df)
+
     combined = pd.concat(dfs, ignore_index=True, sort=False) if dfs else pd.DataFrame()
-    diagnostics = pd.DataFrame(diag_rows)
-    
-    return LoadResult(df=combined, diagnostics=diagnostics)
+    return LoadResult(df=combined)
+
+
+def load_with_excluded_summary(base_dir: str = None, priority_vars: set = None) -> tuple:
+    """
+    Like load_measurement_observations, but also returns a top-N excluded codes
+    summary across all files. Useful as a sanity check that priority_vars
+    matches what's actually in the data.
+
+    Returns:
+        (LoadResult, excluded_summary_df) — excluded_summary_df has columns
+        observation_type and count, sorted descending.
+    """
+    if base_dir is None:
+        base_dir = BASE_DIR
+    base_path = Path(base_dir)
+    dfs = []
+    all_excluded_counts = {}
+
+    tsv_files = sorted(base_path.glob("DMC_*/*/mapped-data/MeasurementObservation.tsv"))
+    print(f"Found {len(tsv_files)} MeasurementObservation.tsv files\n", flush=True)
+
+    for tsv_file in tsv_files:
+        source_dir = tsv_file.parents[2].name
+        print(f"Loading {source_dir}...", flush=True)
+
+        file_df = pd.read_csv(
+            tsv_file,
+            sep='\t',
+            dtype=str,
+            engine='python',
+            on_bad_lines=lambda bad_line: bad_line[:5]
+        )
+        file_df['source_dir'] = source_dir
+
+        if priority_vars:
+            mask = file_df['observation_type'].isin(priority_vars)
+            for code, n in file_df.loc[~mask, 'observation_type'].value_counts().items():
+                all_excluded_counts[code] = all_excluded_counts.get(code, 0) + int(n)
+            file_df = file_df[mask]
+
+        dfs.append(file_df)
+
+    combined = pd.concat(dfs, ignore_index=True, sort=False) if dfs else pd.DataFrame()
+    excluded = (
+        pd.DataFrame(
+            sorted(all_excluded_counts.items(), key=lambda kv: -kv[1]),
+            columns=['observation_type', 'count'],
+        )
+        if all_excluded_counts
+        else pd.DataFrame(columns=['observation_type', 'count'])
+    )
+    return LoadResult(df=combined), excluded
 
 
 def summarize_observations(df: pd.DataFrame, var_labels: dict = None) -> pd.DataFrame:
@@ -491,7 +518,7 @@ def format_summary_markdown(summary: pd.DataFrame) -> str:
 
 def main():
     """
-    Main entry point: load data, generate summaries, and save outputs.
+    Main entry point: load data, generate summaries, write outputs.
 
     Uses module-level constants BASE_DIR, HARMONIZED_VARS_PATH, and OUTPUT_DIR.
     Can also be run step-by-step in a Jupyter notebook - see module docstring.
@@ -499,42 +526,22 @@ def main():
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
-    # Load mappings
     print("Loading variable mappings...", flush=True)
     var_labels = get_var_label_lookup()
     priority_vars = set(var_labels.keys())
     print(f"Found {len(priority_vars)} priority variables\n", flush=True)
 
-    # Load data
-    print("Loading MeasurementObservation files...", flush=True)
-    result = load_measurement_observations(BASE_DIR, priority_vars)
-    
-    # Print diagnostics
-    print("\n" + "="*80)
-    print("DIAGNOSTICS BY FILE")
-    print("="*80)
-    print(result.diagnostics.to_string())
-    
-    # Save diagnostics
-    diag_file = OUTPUT_DIR / f'diagnostics_{timestamp}.tsv'
-    result.diagnostics.to_csv(diag_file, sep='\t', index=False)
-    print(f"\nDiagnostics saved to: {diag_file}")
-    
-    # Summarize
+    print(f"Loading MeasurementObservation files from {BASE_DIR}...", flush=True)
+    result, excluded = load_with_excluded_summary(BASE_DIR, priority_vars)
+
     print("\n" + "="*80)
     print("GENERATING SUMMARY STATISTICS")
     print("="*80)
     summary = summarize_observations(result.df, var_labels)
-    
-    # Print summary
-    print("\n" + format_summary_for_print(summary))
-    
-    # Save summary
     summary_file = OUTPUT_DIR / f'measurement_summary_{timestamp}.tsv'
     summary.to_csv(summary_file, sep='\t', index=False)
-    print(f"\nSummary saved to: {summary_file}")
+    print(f"Summary saved to: {summary_file}")
 
-    # Sheets-pasteable TSV + coverage report
     sheets_tsv, coverage = format_for_sheets(summary, var_labels)
     sheets_file = OUTPUT_DIR / f'table_s5_paste_{timestamp}.tsv'
     sheets_file.write_text(sheets_tsv)
@@ -543,6 +550,21 @@ def main():
     coverage_file = OUTPUT_DIR / f's5_coverage_{timestamp}.tsv'
     coverage.to_csv(coverage_file, sep='\t', index=False)
     print(f"S5 coverage report saved to: {coverage_file}")
+
+    print("\n" + "="*80)
+    print("RUN SUMMARY")
+    print("="*80)
+    cohort_dirs = sorted(result.df['source_dir'].unique()) if len(result.df) else []
+    print(f"Files loaded: {len(cohort_dirs)} cohort/consent dirs")
+    print(f"Total rows (priority-filtered): {len(result.df):,}")
+    if len(result.df):
+        print(f"Unique observation types: {result.df['observation_type'].nunique()}")
+        print(f"Unique participants: {result.df['associated_participant'].nunique():,}")
+
+    if len(excluded):
+        total_excluded = int(excluded['count'].sum())
+        print(f"\nExcluded {total_excluded:,} non-priority rows. Top 10 codes:")
+        print(excluded.head(10).to_string(index=False))
 
     print("\n" + "="*80)
     print("S5 COVERAGE")
@@ -556,18 +578,6 @@ def main():
         print(f"\nMissing from data ({len(missing)}):")
         for m in missing:
             print(f"  - {m}")
-
-    # Quick stats
-    print("\n" + "="*80)
-    print("QUICK STATS")
-    print("="*80)
-    print(f"Total rows loaded: {len(result.df):,}")
-    print(f"Unique observation types: {result.df['observation_type'].nunique()}")
-    print(f"Unique participants: {result.df['associated_participant'].nunique():,}")
-    
-    total_excluded = result.diagnostics['excluded_rows'].sum()
-    if total_excluded > 0:
-        print(f"\nNOTE: {total_excluded:,} rows with non-priority observation types were excluded")
 
 
 if __name__ == '__main__':
