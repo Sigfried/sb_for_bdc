@@ -245,7 +245,11 @@ def summarize_observations(df: pd.DataFrame, var_labels: dict = None) -> pd.Data
         
         return pd.Series(result)
     
-    summary = df.groupby('observation_type').apply(summarize_group)
+    try:
+        summary = df.groupby('observation_type').apply(summarize_group, include_groups=False)
+    except TypeError:
+        # pandas < 2.2 doesn't accept include_groups
+        summary = df.groupby('observation_type').apply(summarize_group)
     summary = summary.reset_index()
     
     # Add labels if provided
